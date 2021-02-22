@@ -11,4 +11,5 @@ provisioner: {{ .Values.chainDatabase.storageClass.provisioner }}
 parameters:
   type: {{ .Values.chainDatabase.storageClass.type }}
 volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
 
