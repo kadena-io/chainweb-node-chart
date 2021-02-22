@@ -1,0 +1,25 @@
+{{- if (and .Values.ingress.enabled .Values.tls.enabled) -}}
+# ############################################################################ #
+# Certificate Issuer
+
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ include "chainweb.tls.issuerName" . }}
+  labels:
+    {{- include "chainweb.labels" . | nindent 4 }}
+spec:
+  acme:
+    {{- if .Values.tls.staging }}
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    {{- else }}
+    server: https://acme-v02.api.letsencrypt.org/directory
+    {{- end }}
+    email: {{ .Values.tls.email }}
+    privateKeySecretRef:
+      name: {{ include "chainweb.fullname" . }}-letsencrypt-{{ or (and .Values.tls.staging "staging") "prod" }}
+    solvers:
+    - http01:
+        ingress:
+          class:  nginx
+{{- end }}

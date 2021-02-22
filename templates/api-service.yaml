@@ -1,0 +1,23 @@
+{{- $fullName := include "chainweb.fullname" . -}}
+
+# ############################################################################ #
+# Chainweb Service REST API
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullName }}-api
+  labels:
+    {{- include "chainweb.labels" . | nindent 4 }}
+    component: chainweb
+    app: chainweb
+spec:
+  # type: { .Values.p2pService.type }
+  selector:
+    {{- include "chainweb.selectorLabels" . | nindent 4 }}
+  ports:
+  - name: {{ $fullName }}-api
+    protocol: TCP
+    port: {{ .Values.apiPort }}
+    targetPort: {{ .Values.apiPort }}
+

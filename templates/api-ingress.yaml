@@ -1,0 +1,331 @@
+{{- if .Values.ingress.enabled }}
+{{- $fullname := include "chainweb.fullname" . -}}
+{{- $tlsenv := or (and .Values.tls.staging "staging") "prod" -}}
+{{- $secretName := include "chainweb.tls.secretName" . -}}
+# host: {{ required "A value of 'ingress.host' must be provided when ingress is enabled" .Values.ingress.host }}
+
+# ############################################################################ #
+# Global nginx configuration
+
+# apiVersion: v1
+# kind: ConfigMap
+# metadata:
+#   name: {{ $fullname }}-ingress-nginx-controller
+# data:
+#   # proxy-connect-timeout: "10"
+#   # proxy-read-timeout: "120"
+#   # proxy-send-timeout: "120"
+#   # use-proxy-protocol: "true"
+#   # enable-real-ip: "true"
+#   # use-forwarded-headers: "true"
+
+# ---
+
+# ############################################################################ #
+# Ingresses
+# ############################################################################ #
+
+# ############################################################################ #
+# Info
+{{- if .Values.ingress.info.enabled }}
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata:
+  name: {{ $fullname }}-info
+  labels:
+    {{- include "chainweb.labels" . | nindent 4 }}
+    component: chainweb-ingress
+    app: chainweb
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    {{- include "chainweb.ingress.sslAnnotations" . | nindent 4 }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- with .Values.ingress.info.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- with .Values.ingress.info.host | default .Values.ingress.host }}
+  {{- if $.Values.tls.enabled }}
+  tls:
+  - hosts:
+    - {{ . | quote }}
+    secretName: {{ printf "%s-%s" $secretName . | quote }}
+  {{- end }}
+  rules:
+  - host: {{ . | quote }}
+    http:
+      paths:
+      - path: '/health-check'
+        backend:
+          serviceName: {{ $fullname }}-api
+          servicePort: {{ $fullname }}-api
+      - path: '/info'
+        backend:
+          serviceName: chainweb-api
+          servicePort: {{ $fullname }}-api
+  {{- end }}
+{{- end }}
+
+---
+
+# ############################################################################ #
+# Rosetta
+{{- if .Values.ingress.rosetta.enabled }}
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata:
+  name: {{ $fullname }}-rosetta
+  labels:
+    {{- include "chainweb.labels" . | nindent 4 }}
+    component: chainweb-ingress
+    app: chainweb
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    {{- include "chainweb.ingress.sslAnnotations" . | nindent 4 }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- with .Values.ingress.rosetta.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- with .Values.ingress.rosetta.host | default .Values.ingress.host }}
+  {{- if $.Values.tls.enabled }}
+  tls:
+  - hosts:
+    - {{ . | quote }}
+    secretName: {{ printf "%s-%s" $secretName . | quote }}
+  {{- end }}
+  rules:
+  - host: {{ . | quote }}
+    http:
+      paths:
+      - path: '/chainweb/0.0/mainnet01/rosetta/.*'
+        backend:
+          serviceName: {{ $fullname }}-api
+          servicePort: {{ $fullname }}-api
+  {{- end }}
+{{- end }}
+
+---
+
+# ############################################################################ #
+# Pact
+{{- if .Values.ingress.pact.enabled }}
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata:
+  name: {{ $fullname }}-pact
+  labels:
+    {{- include "chainweb.labels" . | nindent 4 }}
+    component: chainweb-ingress
+    app: chainweb
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    {{- include "chainweb.ingress.sslAnnotations" . | nindent 4 }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- with .Values.ingress.pact.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- with .Values.ingress.pact.host | default .Values.ingress.host }}
+  {{- if $.Values.tls.enabled }}
+  tls:
+  - hosts:
+    - {{ . | quote }}
+    secretName: {{ printf "%s-%s" $secretName . | quote }}
+  {{- end }}
+  rules:
+  - host: {{ . | quote }}
+    http:
+      paths:
+      - path: '/chainweb/0.0/mainnet01/chain/[0-9]+/pact/.*'
+        backend:
+          serviceName: {{ $fullname }}-api
+          servicePort: {{ $fullname }}-api
+  {{- end }}
+{{- end }}
+
+---
+
+# ############################################################################ #
+# Header stream
+{{- if .Values.ingress.headerStream.enabled }}
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata:
+  name: {{ $fullname }}-headerstream
+  labels:
+    {{- include "chainweb.labels" . | nindent 4 }}
+    component: chainweb-ingress
+    app: chainweb
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    {{- include "chainweb.ingress.sslAnnotations" . | nindent 4 }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- with .Values.ingress.headerStream.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- with .Values.ingress.headerStream.host | default .Values.ingress.host }}
+  {{- if $.Values.tls.enabled }}
+  tls:
+  - hosts:
+    - {{ . | quote }}
+    secretName: {{ printf "%s-%s" $secretName . | quote }}
+  {{- end }}
+  rules:
+  - host: {{ . | quote }}
+    http:
+      paths:
+      - path: '/chainweb/0.0/mainnet01/header/updates'
+        backend:
+          serviceName: {{ $fullname }}-api
+          servicePort: {{ $fullname }}-api
+  {{- end }}
+{{- end }}
+
+---
+
+# ############################################################################ #
+# Mining
+{{- if .Values.ingress.mining.enabled }}
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata:
+  name: {{ $fullname }}-mining
+  labels:
+    {{- include "chainweb.labels" . | nindent 4 }}
+    component: chainweb-ingress
+    app: chainweb
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/upstream-hash-by: "${binary_remote_addr}"
+    {{- include "chainweb.ingress.sslAnnotations" . | nindent 4 }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- with .Values.ingress.mining.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- with .Values.ingress.mining.host | default .Values.ingress.host }}
+  {{- if $.Values.tls.enabled }}
+  tls:
+  - hosts:
+    - {{ . | quote }}
+    secretName: {{ printf "%s-%s" $secretName . | quote }}
+  {{- end }}
+  rules:
+  - host: {{ . | quote }}
+    http:
+      paths:
+      - path: '/chainweb/0.0/mainnet01/mining'
+        backend:
+          serviceName: {{ $fullname }}-api
+          servicePort: {{ $fullname }}-api
+  {{- end }}
+{{- end }}
+
+---
+
+# ############################################################################ #
+# Chain Data
+{{- if .Values.ingress.chainData.enabled }}
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata:
+  name: {{ $fullname }}-chaindata
+  labels:
+    {{- include "chainweb.labels" . | nindent 4 }}
+    component: chainweb-ingress
+    app: chainweb
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+    nginx.ingress.kubernetes.io/proxy-ssl-verify: "off"
+    {{- include "chainweb.ingress.sslAnnotations" . | nindent 4 }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- with .Values.ingress.chainData.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- with .Values.ingress.chainData.host | default .Values.ingress.host }}
+  {{- if $.Values.tls.enabled }}
+  tls:
+  - hosts:
+    - {{ . | quote }}
+    secretName: {{ printf "%s-%s" $secretName . | quote }}
+  {{- end }}
+  rules:
+  - host: {{ . | quote }}
+    http:
+      paths:
+      - path: '/chainweb/0.0/mainnet01/chain/[0-9]+/(header|hash|branch|payload).*'
+        backend:
+          serviceName: {{ $fullname }}-p2p
+          servicePort: {{ $fullname }}-p2p
+  {{- end }}
+{{- end }}
+
+---
+
+# ############################################################################ #
+# Cut
+{{- if .Values.ingress.cut.enabled }}
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata:
+  name: {{ $fullname }}-cut
+  labels:
+    {{- include "chainweb.labels" . | nindent 4 }}
+    component: chainweb-ingress
+    app: chainweb
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+    nginx.ingress.kubernetes.io/proxy-ssl-verify: "off"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      limit_except GET { deny all; }
+    {{- include "chainweb.ingress.sslAnnotations" . | nindent 4 }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- with .Values.ingress.cut.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- with .Values.ingress.cut.host | default .Values.ingress.host }}
+  {{- if $.Values.tls.enabled }}
+  tls:
+  - hosts:
+    - {{ . | quote }}
+    secretName: {{ printf "%s-%s" $secretName . | quote }}
+  {{- end }}
+  rules:
+  - host: {{ . | quote }}
+    http:
+      paths:
+      - path: '/chainweb/0.0/mainnet01/cut'
+        backend:
+          serviceName: {{ $fullname }}-p2p
+          servicePort: {{ $fullname }}-p2p
+  {{- end }}
+{{- end }}
+{{- end }}
+

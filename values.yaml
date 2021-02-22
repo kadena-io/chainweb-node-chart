@@ -1,0 +1,339 @@
+# Default values for chainweb.
+
+replicaCount: 2
+
+# ############################################################################ #
+# Image
+
+chainwebImage:
+  repository: ghcr.io/kadena-io
+  name: chainweb-node-release
+  pullPolicy: IfNotPresent
+  tag: "2.5"
+
+# Use empty list if the image is public. Otherwise Create a secret with 
+# `kubectl create secret docker-registry NAME ...` and add `{ "name": NAME` } to
+# this list.
+#
+imagePullSecrets: []
+
+# ############################################################################ #
+# Helm stuff
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+resources: {}
+  # limits:
+  #   cpu: 100m
+  #   memory: 128Mi
+  # requests:
+  #   cpu: 2000m
+  #   memory: 4Gi
+
+# ############################################################################ #
+# Ingresses for Service API
+#
+# Please see below how to configure the IP address of the service before
+# enabling TLS.
+
+# This only configures ingress for the respective routes. For routes that are
+# not enabled by default, the respective features must be enabled separately.
+#
+# All services are exposed via HTTPs
+#
+ingress:
+  enabled: true
+  host:
+  info:
+    enabled: true
+    host:
+    annotations:
+  pact:
+    enabled: true
+    host:
+    annotations:
+      # timeout for listen. This is the expected time for 6 blocks.
+      nginx.ingress.kubernetes.io/proxy-read-timeout: "180"
+  rosetta:
+    enabled: true
+    annotations:
+    host:
+  headerStream:
+    enabled: true
+    host:
+    annotations:
+  mining:
+    enabled: false
+    host:
+    annotations:
+  chainData:
+    enabled: true
+    host:
+    annotations:
+  cut:
+    enabled: true
+    host:
+    annotations:
+
+  # Annotations that are added to all ingresses
+  # (cf. https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/annotations/)
+  annotations:
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+
+    # rate limiting:
+    # nginx.ingress.kubernetes.io/limit-rps:
+    # nginx.ingress.kubernetes.io/limit-rpm:
+    # nginx.ingress.kubernetes.io/limit-connections:
+    # nginx.ingress.kubernetes.io/limit-burst-multiplier:
+    # nginx.ingress.kubernetes.io/limit-whitelist:
+
+# It is recommended to disabled tls if you don't yet have DNS set up for the
+# the DNS domain and the public IP.
+#
+tls:
+  enabled: false
+  staging: false
+  # Email address used for ACME registration
+  email: 
+
+# ingress-nginx settings
+#
+ingress-nginx:
+  controller:
+    replicaCount: 2
+
+    # additional configuration 
+    # (cf. https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/configmap/)
+    config:
+
+    service:
+
+      # make sure that nginx ingress forwards the real client IP addresses
+      externalTrafficPolicy: Local
+
+      # On GKE, by default, the ingress is associated with an emphemeral IP address.
+      # In order to promote an ephemral IP to a static IP address do the following:
+      #
+      # gcloud compute addresses create NAME --addresses IP
+      #
+      # loadBalancerIP=TODO
+
+      # additional annotations
+      annotations:
+
+# ############################################################################ #
+# Certmanager
+#
+# It is recommended to not install cert-manager as a dependency but to install
+# it manually via:
+#
+# kubectl create namespace cert-manager
+# helm install cert-manager jetstack/cert-manager \
+#     --namespace cert-manager \
+#     --version v1.2.0 \
+#     --set installCRDs=true
+
+# Whether to install cert-manager. Set this to false if cert-manager is already
+# installed in the cluster.
+#
+# NOTE: setting this to true seems to be currently broken.
+#
+installCertManager: false
+
+# install custom resource definitions (CRDs) with cert-manager:
+cert-manager:
+  installCRDs: true
+
+# ############################################################################ #
+# Ports
+
+# The port that is used for P2P networking, both internally and externally.
+# 
+# NOTE: this port must be accessible on cluster nodes that run chainweb nodes
+# from the public internet.
+#
+p2pPort: 1789
+
+# The port that is used internally for the chainweb service API.
+apiPort: 80
+
+# TODO:
+#
+# Set this to publish nodes with a public domain name and CA authenticated
+# certificate.
+#
+# For this cert-manager must be deployed in the network.
+#
+# It is recommended to use this only with a `replicaCount` of 1.
+#
+# It is the responsibility of the user to ensure that the public DNS record
+# is configured to point the external IP address of the nodes. Currently, no
+# ingress is configured for the nodes.
+#
+# TODO: support more than one node by running a public DNS server that manages
+# the A records for the nodes.
+#
+p2pHostname:
+
+# ############################################################################ #
+# Configuration of chainweb-node logging.
+
+logging:
+  level: warn
+  handle: stdout
+  format: text
+  clusterId: helm-chainweb-node
+
+# ############################################################################ #
+# Chainweb Database
+
+chainDatabase:
+
+  # * On google cloud the use of zonal pd-balanced or pd-ssd disks is recommended.
+  # * Google Cloud: 6/Gi iops for pd-balanced, 30/Gi iops for pd-ssd.
+  #   AWS EC2: 3/Gi iops for gp2/gp3 disks.
+  storageClass:
+    type: pd-ssd
+    provisioner: kubernetes.io/gce-pd
+
+  # We recommend a volume size that is about double the maximum expected
+  # database size. As of 2020-12-23 the db used about 25Gi. We expect the
+  # database to grow by up to 50Gi per year at moderate tx load levels.
+  volumeSize: 60Gi
+
+  # URL for the initial chain database snapshot. The chain database is several
+  # Gigabytes large (about 15Gi as of 2020-12-23) and downloading it can take
+  # significant time and cause considerable costs.
+  #
+  # If this is 'null' pods that are started with an empty database volume will
+  # perform a full catchup, which can take several days.
+  #
+  # Kadena publishes recent snapshots at https://kadena-node-db.s3.us-east-2.amazonaws.com/db-chainweb-node-ubuntu.18.04-latest.tar.gz
+  # This URL can't be used directly, but must be signed for S3 requester-pay requests.
+  #
+  # IMPORT: you must only use database snapshots that you trust!
+  #
+  snapshotUrl:
+
+  # if true, the database is (re)initialized even if it does already exist
+  forceInitialization: false
+
+# ############################################################################ #
+# Chainweb Node
+#
+# For expert level configuration options please edit the file
+# chainweb-config.yaml directly.
+#
+
+# chainwebVersion selects the version of the network. Valid values are
+# 'mainnet01' for the production network and 'testnet04' for the test network.
+chainwebVersion: mainnet01
+
+# whether to check network connectivity on startup
+checkConnectivity: true
+
+# Sets of bootstraps nodes for connecting to the P2P network on node startup.
+# These nodes should be both trusted and reliable.
+bootstrapNodes:
+
+  # the set of default bootstrap nodes for the Kadena mainnet
+  mainnet01:
+  - us-e1.chainweb.com:443
+  - us-e2.chainweb.com:443
+  - us-e3.chainweb.com:443
+  - us-w1.chainweb.com:443
+  - us-w2.chainweb.com:443
+  - us-w3.chainweb.com:443
+  - fr1.chainweb.com:443
+  - fr2.chainweb.com:443
+  - fr3.chainweb.com:443
+  - jp1.chainweb.com:443
+  - jp2.chainweb.com:443
+  - jp3.chainweb.com:443
+
+  # the set of default bootstrap nodes for the Kadena testnet
+  testnet04:
+  - us1.testnet.com:443
+  - us2.testnet.com:443
+  - eu1.testnet.com:443
+  - eu2.testnet.com:443
+  - ap1.testnet.com:443
+  - ap2.testnet.com:443
+
+  development:
+
+# API features
+features:
+  # required by chainweb data?
+  allowReadsInLocal: false
+
+  # required by chainweb data and block explorer
+  headerStream: false
+
+  # Enable Rosetta API
+  rosetta: false
+
+# Number of cut sessions that are kept open concurrently. Smaller values
+# increase the risk of being throttled, larger values can cause network stack
+# congestion which can results in increased orphan rates.
+#
+cutSessionCount: 8
+
+# Number of mempool sessions that are kept open concurrently PER CHAIN. It is
+# recommended to use small values here. Small values can increase transaction
+# latencies, but at the same time network load is reduced, which helps to keep
+# orphan rates low.
+#
+mempoolSessionCount: 5
+
+# If an ingress is used it is recommended to implementing throttling of local
+# and mining (and possibly other service endpoints) in the ingress and use
+# liberal settings for global and putPeer.
+#
+throttling:
+  local: 0.1
+  mining: 2
+  global: 200.0
+  putPeer: 21
+
+# ############################################################################ #
+# Mining API
+
+mining:
+  # A list of miner keys
+  #
+  # Account names are assumed to be the same as the key and are created when the
+  # first block is mined. The key predicate is `keys-all`.
+  #
+  miners: []
+
+  # ONLY FOR TESTING. DO NOT USE IN PRODUCTION. 
+  #
+  # The key of the in-node miner. If this is null (default) in-node mining is
+  # disabled.
+  #
+  nodeMiner: null
+

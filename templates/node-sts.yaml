@@ -1,0 +1,272 @@
+# ############################################################################ #
+# Chainweb Node StatefulSet
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "chainweb.fullname" . }}
+  labels:
+    {{- include "chainweb.labels" . | nindent 4 }}
+    component: chainweb
+    app: chainweb
+    version: "{{ .Values.chainwebImage.tag }}"
+spec:
+  serviceName: {{ include "chainweb.fullname" . }}
+  replicas: {{ .Values.replicaCount }}
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      {{- include "chainweb.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "chainweb.selectorLabels" . | nindent 8 }}
+        component: chainweb
+        app: chainweb
+    spec:
+
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "chainweb.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+
+      affinity:
+
+        # ensure that there's at most one chainweb-node pod per kubernetes node.
+        #
+        # For creating more than one node, the spec would have to guarantee that
+        # they used different external ports and that those ports would be
+        # passed to the node containers in the environment.
+
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: component
+                operator: In
+                values:
+                - chainweb
+            topologyKey: "kubernetes.io/hostname"
+
+      terminationGracePeriodSeconds: 10
+
+      containers:
+
+      # Node Container
+      - name: {{ .Chart.Name }}
+        securityContext:
+          {{- toYaml .Values.securityContext | nindent 10 }}
+        image: "{{ .Values.chainwebImage.repository }}/{{ .Values.chainwebImage.name }}:{{ .Values.chainwebImage.tag }}"
+        imagePullPolicy: "{{ .Values.chainwebImage.pullPolicy }}"
+        command:
+        - "/bin/sh"
+        - "-c"
+        - |
+          /chainweb/chainweb-node \
+          --config-file=/etc/chainweb/config.yaml \
+          --config-file=/etc/chainweb/mempool.yaml \
+          --config-file=/etc/chainweb/p2p.yaml \
+          --config-file=/etc/chainweb/mining.yaml \
+          --config-file=/etc/chainweb/logging.yaml \
+          --p2p-hostname=$(cat /etc/hostInfo/externalIP) \
+          --p2p-port={{ .Values.p2pPort }} \
+          --service-port={{ .Values.apiPort }} \
+          +RTS -N -t -A64M -H500M -RTS
+        ports:
+        - name: p2p-port
+          containerPort: {{ .Values.p2pPort }}
+          hostPort: {{ .Values.p2pPort }}
+        - name: chainweb-port
+          containerPort: {{ .Values.apiPort }}
+
+        volumeMounts:
+        - name: chainweb-config
+          mountPath: "/etc/chainweb"
+        - name: chain-database
+          mountPath: "/data/chainweb-db/0"
+        - name: host-info
+          mountPath: /etc/hostInfo
+          readOnly: true
+
+        # not yet supported on GKE
+        startupProbe:
+          timeoutSeconds: 1
+          failureThreshold: 30
+          periodSeconds: 10
+          httpGet:
+            scheme: HTTP
+            port: chainweb-port
+            path: '/health-check'
+        livenessProbe:
+          initialDelaySeconds: 800 # lower this value once startupProbe starts to work
+          timeoutSeconds: 1
+          failureThreshold: 3
+          periodSeconds: 30
+          httpGet:
+            scheme: HTTP
+            port: chainweb-port
+            path: '/health-check'
+        readinessProbe:
+          timeoutSeconds: 1
+          failureThreshold: 2
+          periodSeconds: 5
+          httpGet:
+            scheme: HTTPS
+            port: p2p-port
+            path: '/chainweb/0.0/{{ .Values.chainwebVersion }}/cut'
+
+      initContainers:
+
+      # Check Ulimit
+      - name: check-ulimit
+        image: "{{ .Values.chainwebImage.repository }}/{{ .Values.chainwebImage.name }}:{{ .Values.chainwebImage.tag }}"
+        imagePullPolicy: "{{ .Values.chainwebImage.pullPolicy }}"
+        command:
+        - '/bin/bash'
+        - '-c'
+        - |
+          UL=$(ulimit -n -S)
+          [[ "$UL" -ge 65536 ]] ||
+          {
+              echo "The configuration of the container has a too tight limit for the number of open file descriptors. The limit is $UL but at least 65536 is required." 1>&2
+              echo "Try starting the container with '--ulimit \"nofile=65536:65536\"'" 1>&2
+              exit 1
+          }
+
+      # Detect and store external IP address
+      - name: get-external-ip
+        image: alpine
+        command: ['/bin/sh', '-c', 'wget -q -O /etc/hostInfo/externalIP "http://api.ipify.org"']
+        # command:
+        # - 'sh'
+        # - 'c'
+        # - |
+        #   apk add --no-cache curl
+        #   K8S=https://$KUBERNETES_SERVICE_HOST:$KUBERNETES_SERVICE_PORT
+        #   TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+        #   CACERT=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        #   NAMESPACE=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
+        #   curl -H "Authorization: Bearer $TOKEN" --cacert $CACERT $K8S/healthz
+        #
+        volumeMounts:
+        - name: host-info
+          mountPath: /etc/hostInfo
+
+      {{- if .Values.checkConnectivity }}
+      # Check connectivity
+      - name: check-connectivity
+        image: "{{ .Values.chainwebImage.repository }}/{{ .Values.chainwebImage.name }}:{{ .Values.chainwebImage.tag }}"
+        imagePullPolicy: "{{ .Values.chainwebImage.pullPolicy }}"
+        command:
+        - '/bin/bash'
+        - '-c'
+        - |
+            apt-get update
+            apt-get -y install xxd curl
+            echo "Checking connectivity"
+            RESULT=0
+            COUNT=0
+            {{- $p2pPort := .Values.p2pPort }}
+            {{- range (index .Values.bootstrapNodes .Values.chainwebVersion) }}
+            {{- $addr := slice (splitList ":" ( . | toString)) 0 2 | join ":" }}
+            COUNT=$((COUNT + 1)) &&
+            CHAINWEB_BOOTSTRAP_NODE="{{ $addr }}" bash /etc/chainweb/check-connectivity.sh "$(cat /etc/hostInfo/externalIP)" "{{ $p2pPort }}" && 
+            RESULT=$((RESULT + 1)) ||
+            echo "Node $CHAINWEB_BOOTSTRAP_NODE is not reachable under its public host address $(cat /etc/hostInfo/externalIP):{{ $p2pPort }}" 1>&2
+            {{- end }}
+            [[ 1 -eq $((RESULT >= COUNT / 2 )) ]] &&
+            echo "Reachability check succeeded to connect to $RESULT out of $COUNT nodes" ||
+            {
+              echo "Reabability check failed: less than half of the bootstrap nodes are reachable. ($RESULT / $COUNT)" 1>&2
+              exit 1
+            }
+        ports:
+        - name: p2p-port
+          containerPort: {{ .Values.p2pPort }}
+          hostPort: {{ .Values.p2pPort }}
+        volumeMounts:
+        - name: host-info
+          mountPath: /etc/hostInfo
+          readOnly: true
+        - name: chainweb-config
+          mountPath: "/etc/chainweb"
+          readOnly: true
+        env:
+        - name: CHAINWEB_NETWORK
+          value: "{{ .Values.chainwebVersion }}"
+      {{- end }}
+
+      {{- if .Values.chainDatabase.snapshotUrl }}
+      # Initialize DB
+      - name: initialize-db
+        image: alpine
+        command:
+        - 'sh'
+        - '-c'
+        - |
+          apk add --no-cache curl
+          echo "Initialize DB: check if db exists"
+          echo "force initialization: {{ .Values.chainDatabase.forceInitialization }}"
+          if [[ ! -d "$DBDIR/rocksDb" || "{{ .Values.chainDatabase.forceInitialization }}" = "true" ]] ; then
+            echo "Initialize DB from URL: $DBURL"
+            INITDB="$DBDIR/initializing"
+            rm -rf "$INITDB" "$DBDIR/rocksDb" "$DBDIR/sqlite"
+            mkdir -p "$INITDB"
+            {{- if .Values.chainDatabase.snapshotUrl }}
+            curl --progress-bar "$DBURL" | tar -xzC "$INITDB"
+            echo "finished downloading"
+            mv "$INITDB/rocksDb" "$DBDIR"
+            mv "$INITDB/sqlite" "$DBDIR"
+            rm -rf "$INITDB"
+            {{- end }}
+          else
+            echo "Skip db initialization; existing db found at $DBDIR/rocksDb"
+          fi
+        volumeMounts:
+        - name: chain-database
+          mountPath: /data/chainweb-db/0
+        env:
+        - name: "DBURL"
+          value: {{ .Values.chainDatabase.snapshotUrl }}
+        - name: "DBDIR"
+          value: "/data/chainweb-db/0"
+        {{- end }}
+
+      volumes:
+      - name: chainweb-config
+        configMap:
+          name: {{ include "chainweb.fullname" . }}
+          items:
+          - key: config
+            path: config.yaml
+          - key: p2p
+            path: p2p.yaml
+          - key: mining
+            path: mining.yaml
+          - key: mempool
+            path: mempool.yaml
+          - key: logging
+            path: logging.yaml
+
+          - key: checkConnectivity
+            path: check-connectivity.sh
+      - name: host-info
+        emptyDir: {}
+
+  volumeClaimTemplates:
+  - metadata:
+      name: chain-database
+    spec:
+      storageClassName: {{ include "chainweb.fullname" . }}-chain-database-sc
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: {{ .Values.chainDatabase.volumeSize }}

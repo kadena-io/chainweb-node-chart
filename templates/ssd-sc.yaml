@@ -1,0 +1,14 @@
+# ############################################################################ #
+# Storage class for Chain DBs persistent volumes
+
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ include "chainweb.fullname" . }}-chain-database-sc
+  labels:
+    {{- include "chainweb.labels" . | nindent 4 }}
+provisioner: {{ .Values.chainDatabase.storageClass.provisioner }}
+parameters:
+  type: {{ .Values.chainDatabase.storageClass.type }}
+volumeBindingMode: WaitForFirstConsumer
+

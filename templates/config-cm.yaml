@@ -1,0 +1,237 @@
+# ############################################################################ #
+# Chainweb Node Configuration
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "chainweb.fullname" . }}
+  labels:
+    {{- include "chainweb.labels" . | nindent 4 }}
+data:
+
+  # ##################################### #
+  # Misc Config
+  config: |
+    databaseDirectory: "/data/chainweb-db"
+    resetChainDatabases: false
+    chainweb:
+
+      # version
+      chainwebVersion: {{ .Values.chainwebVersion }}
+
+      # Features
+      allowReadsInLocal: {{ .Values.features.allowReadsInLocal }}
+      headerStream: {{ .Values.features.headerStream }}
+      rosetta: {{ .Values.features.rosetta }}
+
+      # throttling
+      {{- with .Values.throttling }}
+      throttling:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      # Cuts
+      cuts:
+        pruneChainDatabase: none
+        fetchTimeout: 3000000
+        initialCutHeightLimit: null
+
+  # ##################################### #
+  # P2P
+  p2p: |
+    chainweb:
+      p2p:
+        ignoreBootstrapNodes: true
+        sessionTimeout: 300
+        maxSessionCount: {{ .Values.cutSessionCount }}
+        maxPeerCount: 100
+        private: false
+        peer:
+          # hostaddress values are passed as command line arguments
+          certificateChainFile: null
+          key: null
+          interface: '*'
+          certificateChain: null
+          keyFile: null
+        {{- if (index .Values.bootstrapNodes .Values.chainwebVersion) }}
+        peers:
+        {{- range (index .Values.bootstrapNodes .Values.chainwebVersion) }}
+        {{- $addr := split ":" (. | toString) }}
+        - address:
+            hostname: {{ $addr._0 | quote }}
+            port: {{ $addr._1 | default 443 }}
+          id: {{ $addr._2 | default "null" }}
+        {{- end }}
+        {{- end}}
+
+  # ##################################### #
+  # Mempool
+  mempool: |
+    chainweb:
+      reintroduceTx: true
+      mempoolP2p:
+        enabled: true
+        configuration:
+          pollInterval: 30
+          maxSessionCount: {{ .Values.mempoolSessionCount }}
+          sessionTimeout: 300
+      transactionIndex:
+        enabled: true
+        configuration: {}
+
+  # ##################################### #
+  # Mining
+  mining: |
+    chainweb:
+      mining:
+        coordination:
+          enabled: {{ if or .Values.mining.miners .Values.mining.nodeMiner -}} true {{- else -}} false {{- end }}
+          {{- if .Values.mining.miners }}
+          miners:
+            {{- range .Values.mining.miners }}
+            - account: {{ . | quote }}
+              public-keys: [ {{ . | quote }} ]
+              predicate: keys-all
+            {{- end }}
+          {{- end }}
+        nodeMining:
+          {{- if .Values.mining.nodeMiner }}
+          enabled: true
+          miner:
+            account: {{ .Values.mining.nodeMiner | quote }}
+            public-keys: [ {{ .Values.mining.nodeMiner | quote }} ]
+            predicate: keys-all
+          {{- else }}
+          enabled: false
+          {{- end }}
+
+  # ##################################### #
+  # logging
+  logging: |
+    logging:
+      telemetryBackend:
+        enabled: true
+        configuration:
+          handle: {{ .Values.logging.handle | quote }}
+          color: auto
+          format: {{ .Values.logging.format }}
+      backend:
+        handle: {{ .Values.logging.handle | quote }}
+        color: auto
+        format: {{ .Values.logging.format }}
+      logger:
+        log_level: {{ .Values.logging.level }}
+        queue_size: 10000
+        exception_wait: 1000
+        exit_timeout: 1000000
+        scope: []
+        exception_limit: 10
+        policy: discard
+      clusterId: {{ .Values.logging.clusterId | quote }}
+      filter:
+        rules:
+        - key: component
+          value: http
+          level: warn
+        - key: component
+          value: http
+          level: warn
+        default: debug
+
+  # ##################################### #
+  # Connectivity Check Script
+  #
+  # TODO remove once connectivity check is merged into node
+  #
+  checkConnectivity: |
+    #!/usr/bin/env bash
+
+    # set -e
+
+    # ############################################################################ #
+    # PARAMETERS
+
+    HOST=$1
+    PORT=$2
+
+    CHAINWEB_NETWORK=${CHAINWEB_NETWORK:-mainnet01}
+    CHAINWEB_BOOTSTRAP_NODE=${CHAINWEB_BOOTSTRAP_NODE:-us-e1.chainweb.com}
+
+    # ############################################################################ #
+    # Temporary files
+
+    CERTFILE=$(mktemp)
+    KEYFILE=$(mktemp)
+
+    trap '{ rm -f -- "$CERTFILE" "$KEYFILE" ; }' EXIT
+
+    # ############################################################################ #
+    # Utils
+
+    function create-certificate {
+        openssl req \
+            -x509 \
+            -newkey rsa:4096 \
+            -keyout "$KEYFILE" \
+            -out "$CERTFILE" \
+            -days 1 \
+            -nodes \
+            -subj "/CN=$HOST" \
+            > /dev/null 2>&1
+        get-fingerprint < "$CERTFILE"
+    }
+
+    function get-fingerprint {
+        openssl x509 -fingerprint -noout -sha256 |
+        sed 's/://g' |
+        tail -c 65 |
+        xxd -r -p |
+        base64 |
+        tr -d '=' |
+        tr '/+' '_-'
+    }
+
+    function run-server {
+        echo -e "HTTP/1.0 200 OK\nX-Chainweb-Node-Version: 2.4\n" |
+        openssl s_server -port "$PORT" -cert "$CERTFILE" -key "$KEYFILE" &
+    }
+
+    # ############################################################################ #
+    # Perform Check
+
+    # Create certificate
+    CERTID=$(create-certificate)
+
+    # start server in the background
+    run-server
+
+    # make request to chainweb bootstrap node
+    PEER_INFO="{\"address\": {\"hostname\": \"$HOST\", \"port\": $PORT}, \"id\": \"$CERTID\"}"
+
+    echo
+    echo "running connectivity check:"
+    echo curl "https://$CHAINWEB_BOOTSTRAP_NODE/chainweb/0.0/$CHAINWEB_NETWORK/cut/peer" \
+        -sLk \
+        -XPUT \
+        -H 'content-type: application/json' \
+        -H 'X-Chainweb-Node-Version: 2.4' \
+        -v \
+        -d "$PEER_INFO"
+    echo
+    curl "https://$CHAINWEB_BOOTSTRAP_NODE/chainweb/0.0/$CHAINWEB_NETWORK/cut/peer" \
+        -sLk \
+        -XPUT \
+        -H 'content-type: application/json' \
+        -H 'X-Chainweb-Node-Version: 2.4' \
+        -v \
+        -d "$PEER_INFO" 2>&1
+    echo
+    curl "https://$CHAINWEB_BOOTSTRAP_NODE/chainweb/0.0/$CHAINWEB_NETWORK/cut/peer" \
+        -sLk \
+        -XPUT \
+        -H 'content-type: application/json' \
+        -H 'X-Chainweb-Node-Version: 2.4' \
+        -v \
+        -d "$PEER_INFO" 2>&1 |
+        grep -q "< HTTP/2 204"
+
