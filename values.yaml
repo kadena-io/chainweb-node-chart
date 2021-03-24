@@ -7,9 +7,9 @@ replicaCount: 2
 
 chainwebImage:
   repository: ghcr.io/kadena-io
-  name: chainweb-node-release
+  name: chainweb-node
   pullPolicy: IfNotPresent
-  tag: "2.6"
+  tag: "sha-c87ff3d"
 
 # Use empty list if the image is public. Otherwise Create a secret with 
 # `kubectl create secret docker-registry NAME ...` and add `{ "name": NAME` } to
@@ -251,9 +251,6 @@ chainDatabase:
 # chainwebVersion selects the version of the network. Valid values are
 # 'mainnet01' for the production network and 'testnet04' for the test network.
 chainwebVersion: mainnet01
-
-# whether to check network connectivity on startup
-checkConnectivity: true
 
 # Sets of bootstraps nodes for connecting to the P2P network on node startup.
 # These nodes should be both trusted and reliable.
