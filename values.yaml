@@ -7,7 +7,7 @@ replicaCount: 2
 
 chainwebImage:
   repository: ghcr.io/kadena-io
-  name: chainweb-node-release
+  name: chainweb-node/ubuntu
   pullPolicy: IfNotPresent
   tag: "2.6"
 
