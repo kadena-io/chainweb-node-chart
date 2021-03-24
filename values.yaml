@@ -7,7 +7,7 @@ replicaCount: 2
 
 chainwebImage:
   repository: ghcr.io/kadena-io
-  name: chainweb-node
+  name: chainweb-node-alpine
   pullPolicy: IfNotPresent
   tag: "sha-c87ff3d"
 

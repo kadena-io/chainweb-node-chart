@@ -65,20 +65,21 @@ spec:
           {{- toYaml .Values.securityContext | nindent 10 }}
         image: "{{ .Values.chainwebImage.repository }}/{{ .Values.chainwebImage.name }}:{{ .Values.chainwebImage.tag }}"
         imagePullPolicy: "{{ .Values.chainwebImage.pullPolicy }}"
-        command:
-        - "/bin/sh"
-        - "-c"
-        - |
-          /chainweb/chainweb-node \
-          --config-file=/etc/chainweb/config.yaml \
-          --config-file=/etc/chainweb/mempool.yaml \
-          --config-file=/etc/chainweb/p2p.yaml \
-          --config-file=/etc/chainweb/mining.yaml \
-          --config-file=/etc/chainweb/logging.yaml \
-          --p2p-hostname=0.0.0.0 \
-          --p2p-port={{ .Values.p2pPort }} \
-          --service-port={{ .Values.apiPort }} \
-          +RTS -N -t -A64M -H500M -RTS
+        args:
+        - "--config-file=/etc/chainweb/config.yaml"
+        - "--config-file=/etc/chainweb/mempool.yaml"
+        - "--config-file=/etc/chainweb/p2p.yaml"
+        - "--config-file=/etc/chainweb/mining.yaml"
+        - "--config-file=/etc/chainweb/logging.yaml"
+        - "--p2p-hostname=0.0.0.0" # the external IP is autodetected with help of the bootstrap nodes
+        - "--p2p-port={{ .Values.p2pPort }}"
+        - "--service-port={{ .Values.apiPort }}"
+        - "+RTS"
+        - "-N"
+        - "-t"
+        - "-A64M"
+        - "-H500M"
+        - "-RTS"
         ports:
         - name: p2p-port
           containerPort: {{ .Values.p2pPort }}
@@ -126,11 +127,12 @@ spec:
         image: "{{ .Values.chainwebImage.repository }}/{{ .Values.chainwebImage.name }}:{{ .Values.chainwebImage.tag }}"
         imagePullPolicy: "{{ .Values.chainwebImage.pullPolicy }}"
         command:
-        - '/bin/bash'
+        - '/bin/sh'
+        args:
         - '-c'
         - |
           UL=$(ulimit -n -S)
-          [[ "$UL" -ge 65536 ]] ||
+          [ "$UL" -ge 65536 ] ||
           {
               echo "The configuration of the container has a too tight limit for the number of open file descriptors. The limit is $UL but at least 65536 is required." 1>&2
               echo "Try starting the container with '--ulimit \"nofile=65536:65536\"'" 1>&2
@@ -143,6 +145,7 @@ spec:
         image: alpine
         command:
         - 'sh'
+        args:
         - '-c'
         - |
           apk add --no-cache curl
