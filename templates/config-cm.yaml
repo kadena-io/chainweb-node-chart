@@ -41,10 +41,10 @@ data:
   p2p: |
     chainweb:
       p2p:
-        ignoreBootstrapNodes: true
+        ignoreBootstrapNodes: false
         sessionTimeout: 300
         maxSessionCount: {{ .Values.cutSessionCount }}
-        maxPeerCount: 100
+        maxPeerCount: 1000
         private: false
         peer:
           # hostaddress values are passed as command line arguments
