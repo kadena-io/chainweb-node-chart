@@ -7,9 +7,9 @@ replicaCount: 2
 
 chainwebImage:
   repository: ghcr.io/kadena-io
-  name: chainweb-node-alpine
+  name: chainweb-node/alpine
   pullPolicy: IfNotPresent
-  tag: "sha-c87ff3d"
+  tag: "2.7"
 
 # Use empty list if the image is public. Otherwise Create a secret with 
 # `kubectl create secret docker-registry NAME ...` and add `{ "name": NAME` } to
