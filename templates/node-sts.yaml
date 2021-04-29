@@ -65,20 +65,21 @@ spec:
           {{- toYaml .Values.securityContext | nindent 10 }}
         image: "{{ .Values.chainwebImage.repository }}/{{ .Values.chainwebImage.name }}:{{ .Values.chainwebImage.tag }}"
         imagePullPolicy: "{{ .Values.chainwebImage.pullPolicy }}"
-        command:
-        - "/bin/sh"
-        - "-c"
-        - |
-          /chainweb/chainweb-node \
-          --config-file=/etc/chainweb/config.yaml \
-          --config-file=/etc/chainweb/mempool.yaml \
-          --config-file=/etc/chainweb/p2p.yaml \
-          --config-file=/etc/chainweb/mining.yaml \
-          --config-file=/etc/chainweb/logging.yaml \
-          --p2p-hostname=$(cat /etc/hostInfo/externalIP) \
-          --p2p-port={{ .Values.p2pPort }} \
-          --service-port={{ .Values.apiPort }} \
-          +RTS -N -t -A64M -H500M -RTS
+        args:
+        - "--config-file=/etc/chainweb/config.yaml"
+        - "--config-file=/etc/chainweb/mempool.yaml"
+        - "--config-file=/etc/chainweb/p2p.yaml"
+        - "--config-file=/etc/chainweb/mining.yaml"
+        - "--config-file=/etc/chainweb/logging.yaml"
+        - "--p2p-hostname=0.0.0.0" # the external IP is autodetected with help of the bootstrap nodes
+        - "--p2p-port={{ .Values.p2pPort }}"
+        - "--service-port={{ .Values.apiPort }}"
+        - "+RTS"
+        - "-N"
+        - "-t"
+        - "-A64M"
+        - "-H500M"
+        - "-RTS"
         ports:
         - name: p2p-port
           containerPort: {{ .Values.p2pPort }}
@@ -91,9 +92,6 @@ spec:
           mountPath: "/etc/chainweb"
         - name: chain-database
           mountPath: "/data/chainweb-db/0"
-        - name: host-info
-          mountPath: /etc/hostInfo
-          readOnly: true
 
         # not yet supported on GKE
         startupProbe:
@@ -129,79 +127,17 @@ spec:
         image: "{{ .Values.chainwebImage.repository }}/{{ .Values.chainwebImage.name }}:{{ .Values.chainwebImage.tag }}"
         imagePullPolicy: "{{ .Values.chainwebImage.pullPolicy }}"
         command:
-        - '/bin/bash'
+        - '/bin/sh'
+        args:
         - '-c'
         - |
           UL=$(ulimit -n -S)
-          [[ "$UL" -ge 65536 ]] ||
+          [ "$UL" -ge 65536 ] ||
           {
               echo "The configuration of the container has a too tight limit for the number of open file descriptors. The limit is $UL but at least 65536 is required." 1>&2
               echo "Try starting the container with '--ulimit \"nofile=65536:65536\"'" 1>&2
               exit 1
           }
-
-      # Detect and store external IP address
-      - name: get-external-ip
-        image: alpine
-        command: ['/bin/sh', '-c', 'wget -q -O /etc/hostInfo/externalIP "http://api.ipify.org"']
-        # command:
-        # - 'sh'
-        # - 'c'
-        # - |
-        #   apk add --no-cache curl
-        #   K8S=https://$KUBERNETES_SERVICE_HOST:$KUBERNETES_SERVICE_PORT
-        #   TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
-        #   CACERT=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-        #   NAMESPACE=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
-        #   curl -H "Authorization: Bearer $TOKEN" --cacert $CACERT $K8S/healthz
-        #
-        volumeMounts:
-        - name: host-info
-          mountPath: /etc/hostInfo
-
-      {{- if .Values.checkConnectivity }}
-      # Check connectivity
-      - name: check-connectivity
-        image: "{{ .Values.chainwebImage.repository }}/{{ .Values.chainwebImage.name }}:{{ .Values.chainwebImage.tag }}"
-        imagePullPolicy: "{{ .Values.chainwebImage.pullPolicy }}"
-        command:
-        - '/bin/bash'
-        - '-c'
-        - |
-            apt-get update
-            apt-get -y install xxd curl
-            echo "Checking connectivity"
-            RESULT=0
-            COUNT=0
-            {{- $p2pPort := .Values.p2pPort }}
-            {{- range (index .Values.bootstrapNodes .Values.chainwebVersion) }}
-            {{- $addr := slice (splitList ":" ( . | toString)) 0 2 | join ":" }}
-            COUNT=$((COUNT + 1)) &&
-            CHAINWEB_BOOTSTRAP_NODE="{{ $addr }}" bash /etc/chainweb/check-connectivity.sh "$(cat /etc/hostInfo/externalIP)" "{{ $p2pPort }}" && 
-            RESULT=$((RESULT + 1)) ||
-            echo "Node $CHAINWEB_BOOTSTRAP_NODE is not reachable under its public host address $(cat /etc/hostInfo/externalIP):{{ $p2pPort }}" 1>&2
-            {{- end }}
-            [[ 1 -eq $((RESULT >= COUNT / 2 )) ]] &&
-            echo "Reachability check succeeded to connect to $RESULT out of $COUNT nodes" ||
-            {
-              echo "Reabability check failed: less than half of the bootstrap nodes are reachable. ($RESULT / $COUNT)" 1>&2
-              exit 1
-            }
-        ports:
-        - name: p2p-port
-          containerPort: {{ .Values.p2pPort }}
-          hostPort: {{ .Values.p2pPort }}
-        volumeMounts:
-        - name: host-info
-          mountPath: /etc/hostInfo
-          readOnly: true
-        - name: chainweb-config
-          mountPath: "/etc/chainweb"
-          readOnly: true
-        env:
-        - name: CHAINWEB_NETWORK
-          value: "{{ .Values.chainwebVersion }}"
-      {{- end }}
 
       {{- if .Values.chainDatabase.snapshotUrl }}
       # Initialize DB
@@ -209,6 +145,7 @@ spec:
         image: alpine
         command:
         - 'sh'
+        args:
         - '-c'
         - |
           apk add --no-cache curl
@@ -254,11 +191,6 @@ spec:
             path: mempool.yaml
           - key: logging
             path: logging.yaml
-
-          - key: checkConnectivity
-            path: check-connectivity.sh
-      - name: host-info
-        emptyDir: {}
 
   volumeClaimTemplates:
   - metadata:
